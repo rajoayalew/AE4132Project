@@ -1,0 +1,9 @@
+clear
+clearvars
+close all
+
+innerRadius = 10;   % km
+outerRadius = 20;   % km
+numSegments = 10;   % 
+numHumans = 100000
+nuclearHeatFlux = 10;
