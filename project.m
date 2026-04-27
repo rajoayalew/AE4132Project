@@ -2,13 +2,27 @@ clear
 clearvars
 close all
 
-ID = 10;   % km
-OD = 20;   % km
-Q  = 10;  % kW/m^3
-qFlux = 10; % kW/m
-k = 10; % thermal conductivity
+%% Spaceship Layout Properties
+
+innerRadius = 10;   % km
+outerRadius = 20;   % km
 numRadial = 1;      % number of radial divisions
 numTheta  = 20;     % number of angular divisions
+
+%% Material Properties
+
+sigma = 5.67 .* 10 .^ -8; % Stephan-Boltzman constant
+epsilon = 0.5;            % Emissivity of material 
+k = 21.9;                 % thermal conductivity (W/(m*K))
+
+%% Heating Properties
+
+Twall = 300;                          % Outer nodes have a known temperature
+Q  = 10000;                           % W/m^3
+qIn = 10;                             % heat flux in from nuclear plant (W/m^2)
+qOut = sigma .* epsilon .* Twall ^ 4; % heat flux out from radiation (W/m^2)
+
+%% Plotting
 
 % Angular divisions 
 theta = linspace(0, 2*pi, numTheta+1);
@@ -39,6 +53,6 @@ end
 
 xlabel('X (km)');
 ylabel('Y (km)');
-title('Equal-Area Annular Mesh');
+title('Equal-Area Mesh');
 
 hold off;
