@@ -27,7 +27,7 @@ qOut = sigma .* epsilon .* Touter ^ 4; % heat flux out from radiation (W/m^2)
 
 offset = 0.2;
 
-%% Mesh Generation
+%% Mesh Creation
 
 % Angular divisions 
 theta = linspace(0, 2*pi, numTheta+1);
@@ -40,6 +40,7 @@ r = sqrt(linspace(innerRadius^2, outerRadius^2, numRadial+1));
 [Theta, R] = meshgrid(theta, r);
 X = R .* cos(Theta);
 Y = R .* sin(Theta);
+
 
 % nodes is a (N x 2) matrix of node coordinates in Cartesian coords
 % For a given radial station i and theta location j, nodeID(i, j) returns 
