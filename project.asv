@@ -6,8 +6,9 @@ close all
 
 innerRadius = 10;   % km
 outerRadius = 20;   % km
-numRadial = 10;     % number of radial divisions
+numRadial = 20;     % number of radial divisions
 numTheta  = 20;     % number of angular divisions
+t = 1;              % thickness (km)
 
 %% Material Properties
 
@@ -17,8 +18,8 @@ k = 21.9;                 % thermal conductivity (W/(m*K))
 
 %% Heat Properties
 
-Tinner = 10000;                        % Inner nodes 
-Touter = 300;                          % Outer nodes have a known temperature
+Tinner = 10000;                        % Temperature of nodes facing nuclear reactor (r = 1 aka inner ring) 
+Touter = 300;                          % Temperature of nodes facing outer space (r = numRadial aka outer ring)
 Q  = 10000;                            % W/m^3
 qIn = 10;                              % heat flux in from nuclear plant (W/m^2)
 qOut = sigma .* epsilon .* Touter ^ 4; % heat flux out from radiation (W/m^2)
@@ -27,7 +28,7 @@ qOut = sigma .* epsilon .* Touter ^ 4; % heat flux out from radiation (W/m^2)
 
 offset = 0.2;
 
-%% Mesh Creation
+%% Mesh Generation
 
 % Angular divisions 
 theta = linspace(0, 2*pi, numTheta+1);
@@ -40,7 +41,6 @@ r = sqrt(linspace(innerRadius^2, outerRadius^2, numRadial+1));
 [Theta, R] = meshgrid(theta, r);
 X = R .* cos(Theta);
 Y = R .* sin(Theta);
-
 
 % nodes is a (N x 2) matrix of node coordinates in Cartesian coords
 % For a given radial station i and theta location j, nodeID(i, j) returns 
@@ -55,7 +55,7 @@ elements = zeros(numElements, 4);
 
 %{
 Each row of the element matrix corresponds to an element in the mesh. Each
-column corresponds to a node in the quadliteral element.
+column corresponds to a node in the quadliteral element. Figure 1.
 
 n2 (i+1,j) ---- n3 (i,j+1)
      |              |
@@ -71,17 +71,96 @@ for i = 1:numRadial
             jp1 = 1;
         end
 
-        n1 = nodeID(i, j);
-        n2 = nodeID(i+1, j);
-        n3 = nodeID(i+1, jp1);
-        n4 = nodeID(i, jp1);
+        n1 = nodeID(i, j);      % node 1 is bottom left
+        n2 = nodeID(i+1, j);    % node 2 is top left
+        n3 = nodeID(i+1, jp1);  % node 3 is top right
+        n4 = nodeID(i, jp1);    % node 4 is bottom right 
 
         elements(currElemNumber,:) = [n1, n2, n3, n4];
         currElemNumber = currElemNumber + 1;
     end
 end
 
+% Shape Functions
 
+% N_1(zeta, eta) = 1/4 * (1 - zeta) * (1 - eta) = 1/4 * (1 - zeta - eta + zeta*eta)
+% N_2(zeta, eta) = 1/4 * (1 - zeta) * (1 + eta) = 1/4 * (1 - zeta + eta - zeta*eta)
+% N_3(zeta, eta) = 1/4 * (1 + zeta) * (1 + eta) = 1/4 * (1 + zeta + eta + zeta*eta)
+% N_4(zeta, eta) = 1/4 * (1 + zeta) * (1 - eta) = 1/4 * (1 + zeta - eta - zeta*eta)
+
+%% Isoparameteric Mapping
+
+% Lambda is our conductivity matrix. The first element and the last element typically
+% indicate the conductivity in the x and y directions, but in this case they are the same
+% as the material is the same throughout the structure
+lambda = [k, 0
+          0, k];
+
+% This gives the gauss points for a 4-node quad element. Each row corresponds to a particular node
+% number. For example, node 1 while being located in reality at zeta = -1, eta = -1, will be located
+% at zeta = -1/sqrt(3) and eta = -1/sqrt(3) for the purposes of guass-quadrature intergration. Node
+% 2 is located at zeta = -1, eta = 1 and therefore the gauss point will be at zeta = -1/sqrt(3) and
+% eta = 1/sqrt(3). The local node number, as shown in the Figure 1 above, is the index into this
+% table. Since we are using a 2-point Gauss quadrature rule the weight is equal to 1.
+%{
+Natural coordinate space (zeta, eta): 
+Figure 2
+   η
+   ↑
+   |   Node 4 (-1,+1)        Node 3 (+1,+1)
+   |        ●----------------●
+   |        |                |
+   |        |    •     •     |   ← Gauss points (±0.577)
+   |        |                |
+   |        |    •     •     |
+   |        |                |
+   |        ●----------------●
+   |   Node 1 (-1,-1)        Node 2 (+1,-1)
+   |
+   +------------------------------→ ζ
+%}
+gaussTable = [-1/sqrt(3), -1/sqrt(3)
+              -1/sqrt(3),  1/sqrt(3)
+               1/sqrt(3),  1/sqrt(3)
+               1/sqrt(3), -1/sqrt(3)];
+
+for currElemNumber = 1:numElements
+
+    % Get the global coordinates of the nodes for a given element
+
+    % currElemeCoords is a 4x2 matrix where the global coordinates
+    % for node 1 is loacted in the first row, node 2's global coordinates
+    % are located in the second row, and so on and so forth
+    currElemCoords = nodes(elements(currElemNumber, :), :);
+
+    % Element stiffness matrix
+    Ke = zeros(4,4);
+
+    for nodeNum = 1:4
+        
+        % Node coords in global coord system
+        nodeCoords = currElemCoords(nodeNum, :); 
+
+        % Gauss coords in local coord system
+        zeta = gaussTable(nodeNum, 1);    
+        eta = gaussTable(nodeNum, 2);
+
+        % Get the partial derivatives at the gauss points for each of the shape functions 
+        [dN_dzeta, dN_deta] = shape_function_derivatives(zeta, eta);
+
+        % Get the Jacobian 
+        [J, detJ] = jacobian(nodeCoords, dN_dzeta, dN_deta);
+
+        % Get the partial derivatives of the shape functions with respect to x and y
+        dN_dxdy = inv(J) * [dN_dzeta'; dN_deta'];
+        dN_dx = dN_dxdy(1,:);
+        dN_dy = dN_dxdy(2,:);
+
+
+
+    end
+
+end
 
 
 %% Plotting 
@@ -128,3 +207,60 @@ xlabel('X');
 ylabel('Y');
 title('Mesh with Global Element and Nodes');
 hold off
+
+%% Functions
+
+function [dN_dzeta, dN_deta] = shape_function_derivatives(zeta, eta)
+
+    % Above there is a section called shape functions which are the shape functions for each node in
+    % the 4-node quad. All I did in this section was take the derivative of each of those shape
+    % functions with respect to zeta and eta. Each index of dN_dzeta and dN_deta corresponds to the
+    % partial derivatives with respect to zeta and eta respectively. The first row is for node 1,
+    % the second row is for node 2, and so on and so forth. Look to Figure 1 to determine what nodes
+    % correspond with what location on the quad.
+
+    dN_dzeta = 1/4 * [
+        -(1 - eta)
+        -(1 + eta)
+         (1 + eta)
+         (1 - eta)
+    ];
+
+    dN_deta = 1/4 * [
+        -(1 - zeta)
+         (1 - zeta)
+         (1 + zeta)
+        -(1 + zeta)
+    ];
+end
+
+function [J, detJ] = jacobian(coords, dN_dzeta, dN_deta)
+    % coords: 4x2 matrix [x y]
+    J = zeros(2,2);
+    
+    %{
+    The Jacobian matrix is equal to:
+    J = [dx/dzeta, dx/deta; dy/dzeta, dy/deta] note that these are
+    all partial derivatives. If you remember, we can get the x and y loacations from
+    a given zeta and eta by using the mapping equation. 
+    x(zeta, eta) = \Sum_{i=1}^{M}x_i * N_i(zeta,eta) and y(zeta, eta)
+    y(zeta, eta) = \Sum_{i=1}^{M}y_i * N_i(zeta,eta)
+    Where x_i and y_i are the the global x and y locations of the node that N_i corresponds to and M
+    = 4 due to us using a 4-node quad.
+   
+    We can also get the partial derivates (like dx/dzeta and dy/deta). We do this by multiplying not
+    by the normal shape functions but their derivatives instead. For example, \frac{\partial
+    x}{\partial zeta} = \Sum_{i=1}^{M}x_i * \frac{\partial N_i(zeta, eta}}{\partial zeta}. We get
+    these partial derivatives of these shape functions from the shape_function_derivatives function
+    above.
+    %}
+
+    for i = 1:4
+        J(1,1) = J(1,1) + dN_dzeta(i) * coords(i,1); % dx/dzeta
+        J(1,2) = J(1,2) + dN_deta(i)  * coords(i,1); % dx/deta
+        J(2,1) = J(2,1) + dN_dzeta(i) * coords(i,2); % dy/dzeta
+        J(2,2) = J(2,2) + dN_deta(i)  * coords(i,2); % dy/deta
+    end
+    
+    detJ = det(J);
+end
